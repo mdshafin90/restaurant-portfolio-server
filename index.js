@@ -3,6 +3,7 @@ require('dotenv').config()
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const app = express();
+const stripe = require("stripe")(process.env.PAYMENT_SECRET_KEY)
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
@@ -49,6 +50,7 @@ async function run() {
         const menuCollection = client.db("restaurantDb").collection("menu");
         const reviewsCollection = client.db("restaurantDb").collection("reviews");
         const cartCollection = client.db("restaurantDb").collection("carts");
+        const paymentCollection = client.db("restaurantDb").collection("payments");
 
         app.post('/jwt', (req, res) => {
             const user = req.body;
@@ -181,6 +183,35 @@ async function run() {
             const query = { _id: new ObjectId(id) };
             const result = await cartCollection.deleteOne(query);
             res.send(result);
+        })
+
+        // create payment intent
+        app.post('/create-payment-intent', verifyJWT, async (req, res) => {
+            const { price } = req.body;
+            const amount = price * 100;
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: "usd",
+                payment_method_types: ["card"],
+            })
+            res.send({
+                clientSecret: paymentIntent.client_secret,
+            });
+        })
+
+        // payment related apis
+        app.post('/payments', verifyJWT, async (req, res) => {
+            const payment = req.body;
+            const insertResult = await paymentCollection.insertOne(payment);
+
+            // delete operation start
+
+            const query = { _id: { $in: payment.cartItems.map(id => new ObjectId(id)) } };
+            const deleteResult = await cartCollection.deleteMany(query)
+
+            // delete operation end
+
+            res.send({ insertResult, deleteResult })
         })
 
         // Send a ping to confirm a successful connection
